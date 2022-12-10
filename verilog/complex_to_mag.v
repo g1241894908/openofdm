@@ -1,5 +1,4 @@
-module complex_to_mag
-#(
+module complex_to_mag #(
     parameter DATA_WIDTH = 16
 )
 (

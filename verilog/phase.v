@@ -1,5 +1,5 @@
 `include "common_defs.v"
-
+//求artan
 module phase
 #(
     parameter DATA_WIDTH = 32
@@ -14,7 +14,7 @@ module phase
     input input_strobe,
 
     // [-pi, pi) scaled up by 512
-    output reg signed [15:0] phase,
+    output reg signed [31:0] phase,
     output output_strobe
 );
 `include "common_params.v"
@@ -25,10 +25,6 @@ reg [DATA_WIDTH-1:0] abs_i;
 reg [DATA_WIDTH-1:0] abs_q;
 reg [DATA_WIDTH-1:0] max;
 reg [DATA_WIDTH-1:0] min;
-wire [DATA_WIDTH-1:0] dividend;
-wire [DATA_WIDTH-`ATAN_LUT_LEN_SHIFT-1:0] divisor;
-assign dividend = (max > 4194304) ? min                                   : {min[DATA_WIDTH-`ATAN_LUT_LEN_SHIFT-1:0], {`ATAN_LUT_LEN_SHIFT{1'b0}}};
-assign divisor  = (max > 4194304) ? max[DATA_WIDTH-1:`ATAN_LUT_LEN_SHIFT] :  max[DATA_WIDTH-`ATAN_LUT_LEN_SHIFT-1:0];
 
 wire div_in_stb;
 
@@ -38,7 +34,7 @@ wire div_out_stb;
 wire [`ATAN_LUT_LEN_SHIFT-1:0] atan_addr;
 wire [`ATAN_LUT_SCALE_SHIFT-1:0] atan_data;
 
-assign atan_addr = (quotient>511?511:quotient[`ATAN_LUT_LEN_SHIFT-1:0]);
+assign atan_addr = quotient[`ATAN_LUT_LEN_SHIFT-1:0];
 wire signed [`ATAN_LUT_SCALE_SHIFT:0] _phase = {1'b0, atan_data};
 
 reg [2:0] quadrant;
@@ -70,15 +66,15 @@ divider div_inst (
     .enable(enable),
     .reset(reset),
 
-    .dividend(dividend),
-    .divisor({{(`ATAN_LUT_LEN_SHIFT-8){1'b0}}, divisor}),
+    .dividend(min),
+    .divisor({{(`ATAN_LUT_LEN_SHIFT-8){1'b0}}, max[31:`ATAN_LUT_LEN_SHIFT]}),
     .input_strobe(div_in_stb),
 
     .quotient(quotient),
     .output_strobe(div_out_stb)
 );
 
-delayT #(.DATA_WIDTH(3), .DELAY(37)) quadrant_inst  (
+delayT #(.DATA_WIDTH(3), .DELAY(36)) quadrant_inst  (
     .clock(clock),
     .reset(reset),
 

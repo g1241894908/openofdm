@@ -1,4 +1,5 @@
 module moving_avg
+//求均值
 #(
     parameter DATA_WIDTH = 32,
     parameter WINDOW_SHIFT = 4,
@@ -63,7 +64,7 @@ always @(posedge clock) begin
             end
 
             if (full) begin
-                running_sum <= running_sum + ext_new_data- ext_old_data;
+                running_sum <= running_sum + ext_new_data - ext_old_data;
             end else begin
                 running_sum <= running_sum + ext_new_data;
             end

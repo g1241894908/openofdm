@@ -75,7 +75,7 @@ Quadrature component instead of the In-phase component. Therefore, we check the
 number of samples in which the quadrature component is larger than in-phase, and
 claim a HT-SIG if enough such samples are detected (4 in |project|).
 
-The HT-SIG field spans two OFDM symbols, and has 48 data bits (96 coded bits) in
+The HG-SIG field spans two OFDM symbols, and has 48 data bits (96 coded bits) in
 total. The constellation points are rotated 90 degrees clockwise before
 decoding.
 
@@ -91,7 +91,7 @@ in |project|:
 
 - MCS: only supports 0 - 7.
 - CBW 20/40: channel bandwidth. |project| only supports 20 MHz channel (0).
-- Reserved: must be 1.
+- Reserved: must be 0.
 - STBC: number of `space time block code
   <https://en.wikipedia.org/wiki/Space%E2%80%93time_block_code>`_. |project|
   only supports 00 (no STBC).

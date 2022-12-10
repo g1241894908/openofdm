@@ -56,7 +56,7 @@ always @(posedge clock) begin
     end else if (enable & sample_in_strobe) begin
         abs_i <= input_i[15]? ~input_i+1: input_i;
         case(state)
-            S_SKIP: begin
+            S_SKIP: begin // 用于跳过设定的的一段时间，即系统不稳定的时候不要自相关检测
                 if(sample_count > num_sample_to_skip) begin
                     state <= S_IDLE;
                 end else begin
@@ -68,7 +68,7 @@ always @(posedge clock) begin
                 if (num_sample_changed) begin
                     sample_count <= 0;
                     state <= S_SKIP;
-                end else if (abs_i > power_thres) begin
+                end else if (abs_i > power_thres) begin   //大于阈值表示检测到功率
                     // trigger on any significant signal 
                     trigger <= 1;
                     sample_count <= 0;

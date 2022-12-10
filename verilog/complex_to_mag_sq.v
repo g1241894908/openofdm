@@ -1,4 +1,5 @@
-module complex_to_mag_sq (
+module complex_to_mag_sq 
+(
     input clock,
     input enable,
     input reset,

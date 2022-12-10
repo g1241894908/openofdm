@@ -3,10 +3,14 @@ module sync_long (
     input reset,
     input enable,
 
+    input set_stb,
+    input [7:0] set_addr,
+    input [31:0] set_data,
+
     input [31:0] sample_in,
     input sample_in_strobe,
-    input signed [15:0] phase_offset,
-    input short_gi,
+    input signed [31:0] phase_offset,  //短头计算出的相偏
+    input short_gi,   //**!!!**暂时不理解
 
     output [`ROTATE_LUT_LEN_SHIFT-1:0] rot_addr,
     input [31:0] rot_data,
@@ -17,10 +21,8 @@ module sync_long (
 
     output reg [31:0] sample_out,
     output reg sample_out_strobe,
-    output reg [15:0] num_ofdm_symbol,
 
-    output reg signed [31:0] phase_offset_taken,
-    output reg [1:0] state
+    output reg [2:0] state
 );
 `include "common_params.v"
 
@@ -52,60 +54,6 @@ reg sum_stb;
 reg signed [31:0] phase_correction;
 reg signed [31:0] next_phase_correction;
 
-reg reset_delay ; // add reset signal for fft, somehow all kinds of event flag raises when feeding real rf signal, maybe reset will help
-wire fft_resetn ;
-
-/*
-// =============save signal to file for matlab bit-true comparison===========
-integer file_open_trigger = 0;
-integer sum_fd, metric_fd, phase_correction_fd, next_phase_correction_fd, fft_in_fd, fft_out_fd;
-wire signed [15:0] fft_out_re_signed, fft_out_im_signed;
-// wire signed [31:0] prod_i, prod_q, prod_avg_i, prod_avg_q, phase_in_i_signed, phase_in_q_signed, phase_out_signed;
-// assign prod_i = prod[63:32];
-assign fft_out_re_signed = fft_out_re[22:7];
-assign fft_out_im_signed = fft_out_im[22:7];
-
-always @(posedge clock) begin
-    file_open_trigger = file_open_trigger + 1;
-    if (file_open_trigger==1) begin
-        sum_fd = $fopen("./sum.txt", "w");
-        metric_fd = $fopen("./metric.txt", "w");
-        phase_correction_fd = $fopen("./phase_correction.txt", "w");
-        next_phase_correction_fd = $fopen("./next_phase_correction.txt", "w");
-        fft_in_fd = $fopen("./fft_in.txt", "w");
-        fft_out_fd = $fopen("./fft_out.txt", "w");
-    end
-
-    if (sum_stb && enable && (~reset) ) begin
-        $fwrite(sum_fd, "%d %d\n", sum_i, sum_q);
-        $fflush(sum_fd);
-    end
-    if (metric_stb && enable && (~reset) ) begin
-        $fwrite(metric_fd, "%d\n", metric);
-        $fflush(metric_fd);
-    end
-    if (raw_stb && enable && (~reset) ) begin
-        $fwrite(phase_correction_fd, "%d\n", phase_correction);
-        $fflush(phase_correction_fd);
-        $fwrite(next_phase_correction_fd, "%d\n", next_phase_correction);
-        $fflush(next_phase_correction_fd);
-    end
-    if (fft_in_stb && enable && (~reset) ) begin
-        $fwrite(fft_in_fd, "%d %d\n", fft_in_re, fft_in_im);
-        $fflush(fft_in_fd);
-    end
-    if (fft_valid && enable && (~reset) ) begin
-        $fwrite(fft_out_fd, "%d %d\n", fft_out_re_signed, fft_out_im_signed);
-        $fflush(fft_out_fd);
-    end
-end
-// ==========end of save signal to file for matlab bit-true comparison===========
-*/
-
-always @(posedge clock) begin
-    reset_delay = reset ;
-end
-assign fft_resetn = (~reset) & (~reset_delay); // make sure resetn is at least 2 clock cycles low 
 
 complex_to_mag #(.DATA_WIDTH(32)) sum_mag_inst (
     .clock(clock),
@@ -122,49 +70,44 @@ complex_to_mag #(.DATA_WIDTH(32)) sum_mag_inst (
 
 reg [31:0] metric_max1;
 reg [(IN_BUF_LEN_SHIFT-1):0] addr1;
+reg [31:0] metric_max2;
+reg [(IN_BUF_LEN_SHIFT-1):0] addr2;
+reg [15:0] gap;
 
-reg [31:0] cross_corr_buf[0:31];
+reg [31:0] cross_corr_buf[0:15];
 
 reg [31:0] stage_X0;
 reg [31:0] stage_X1;
 reg [31:0] stage_X2;
 reg [31:0] stage_X3;
-reg [31:0] stage_X4;
-reg [31:0] stage_X5;
-reg [31:0] stage_X6;
-reg [31:0] stage_X7;
 
 reg [31:0] stage_Y0;
 reg [31:0] stage_Y1;
 reg [31:0] stage_Y2;
 reg [31:0] stage_Y3;
-reg [31:0] stage_Y4;
-reg [31:0] stage_Y5;
-reg [31:0] stage_Y6;
-reg [31:0] stage_Y7;
 
-stage_mult stage_mult_inst (
+stage_mult stage_mult_inst ( //分4拍求出16点的相关和
     .clock(clock),
     .enable(enable),
     .reset(reset),
 
-    .X0(stage_X0),
-    .X1(stage_X1),
-    .X2(stage_X2),
-    .X3(stage_X3),
-    .X4(stage_X4),
-    .X5(stage_X5),
-    .X6(stage_X6),
-    .X7(stage_X7),
+    .X0(stage_X0[31:16]),
+    .X1(stage_X0[15:0]),
+    .X2(stage_X1[31:16]),
+    .X3(stage_X1[15:0]),
+    .X4(stage_X2[31:16]),
+    .X5(stage_X2[15:0]),
+    .X6(stage_X3[31:16]),
+    .X7(stage_X3[15:0]),
 
-    .Y0(stage_Y0),
-    .Y1(stage_Y1),
-    .Y2(stage_Y2),
-    .Y3(stage_Y3),
-    .Y4(stage_Y4),
-    .Y5(stage_Y5),
-    .Y6(stage_Y6),
-    .Y7(stage_Y7),
+    .Y0(stage_Y0[31:16]),
+    .Y1(stage_Y0[15:0]),
+    .Y2(stage_Y1[31:16]),
+    .Y3(stage_Y1[15:0]),
+    .Y4(stage_Y2[31:16]),
+    .Y5(stage_Y2[15:0]),
+    .Y6(stage_Y3[31:16]),
+    .Y7(stage_Y3[15:0]),
 
     .input_strobe(mult_strobe),
 
@@ -174,12 +117,12 @@ stage_mult stage_mult_inst (
 
 localparam S_SKIPPING = 0;
 localparam S_WAIT_FOR_FIRST_PEAK = 1;
-localparam S_IDLE = 2;
-localparam S_FFT = 3;
+localparam S_WAIT_FOR_SECOND_PEAK = 2;
+localparam S_IDLE = 3;
+localparam S_FFT = 4;
 
 reg fft_start;
-//wire fft_start_delayed;
-
+wire fft_start_delayed;
 wire fft_in_stb;
 reg fft_loading;
 wire signed [15:0] fft_in_re;
@@ -196,17 +139,6 @@ wire [31:0] fft_out = {fft_out_re[22:7], fft_out_im[22:7]};
 wire signed [15:0] raw_i;
 wire signed [15:0] raw_q;
 reg raw_stb;
-wire idle_line1, idle_line2 ;
-reg fft_din_data_tlast ;
-wire fft_din_data_tlast_delayed ;
-wire event_frame_started;
-wire event_tlast_unexpected;
-wire event_tlast_missing;
-wire event_status_channel_halt;
-wire event_data_in_channel_halt;
-wire event_data_out_channel_halt;
-wire s_axis_config_tready;
-wire m_axis_data_tlast;
 
 ram_2port  #(.DWIDTH(32), .AWIDTH(IN_BUF_LEN_SHIFT)) in_buf (
     .clka(clock),
@@ -241,16 +173,16 @@ rotate rotate_inst (
     .output_strobe(fft_in_stb)
 );
 
-delayT #(.DATA_WIDTH(1), .DELAY(10)) fft_delay_inst (
+delayT #(.DATA_WIDTH(1), .DELAY(9)) fft_delay_inst (
     .clock(clock),
     .reset(reset),
 
-    .data_in(fft_din_data_tlast),
-    .data_out(fft_din_data_tlast_delayed)
+    .data_in(fft_start),
+    .data_out(fft_start_delayed)
 );
 
-///the fft7_1 isntance is commented out, as it is upgraded to fft9 version
-/*xfft_v7_1 dft_inst (
+
+xfft_v7_1 dft_inst (
     .clk(clock),
     .fwd_inv(1),
     .start(fft_start_delayed),
@@ -264,43 +196,20 @@ delayT #(.DATA_WIDTH(1), .DELAY(10)) fft_delay_inst (
     .done(fft_done),
     .busy(fft_busy),
     .dv(fft_valid)
-);*/
-
-
-xfft_v9 dft_inst (
-  .aclk(clock),       // input wire aclk
-  .aresetn(fft_resetn),                                               
-  .s_axis_config_tdata({7'b0, 1'b1}),                          // input wire [7 : 0] s_axis_config_tdata, use LSB to indicate it is forward transform, the rest should be ignored
-  .s_axis_config_tvalid(1'b1),                                 // input wire s_axis_config_tvalid
-  .s_axis_config_tready(s_axis_config_tready),                // output wire s_axis_config_tready
-  .s_axis_data_tdata({fft_in_im, fft_in_re}),                      // input wire [31 : 0] s_axis_data_tdata
-  .s_axis_data_tvalid(fft_in_stb),                    // input wire s_axis_data_tvalid
-  .s_axis_data_tready(fft_ready),                    // output wire s_axis_data_tready
-  .s_axis_data_tlast(fft_din_data_tlast_delayed),                      // input wire s_axis_data_tlast
-  .m_axis_data_tdata({idle_line1,fft_out_im, idle_line2, fft_out_re}),                      // output wire [47 : 0] m_axis_data_tdata
-  .m_axis_data_tvalid(fft_valid),                    // output wire m_axis_data_tvalid
-  .m_axis_data_tready(1'b1),                    // input wire m_axis_data_tready
-  .m_axis_data_tlast(m_axis_data_tlast),                      // output wire m_axis_data_tlast
-  .event_frame_started(event_frame_started),                  // output wire event_frame_started
-  .event_tlast_unexpected(event_tlast_unexpected),            // output wire event_tlast_unexpected
-  .event_tlast_missing(event_tlast_missing),                  // output wire event_tlast_missing
-  .event_status_channel_halt(event_status_channel_halt),      // output wire event_status_channel_halt
-  .event_data_in_channel_halt(event_data_in_channel_halt),    // output wire event_data_in_channel_halt
-  .event_data_out_channel_halt(event_data_out_channel_halt)  // output wire event_data_out_channel_halt
 );
 
 reg [15:0] num_sample;
+reg [15:0] num_ofdm_symbol;
 
 integer i;
 integer j;
 always @(posedge clock) begin
     if (reset) begin
-        for (j = 0; j < 32; j= j+1) begin
+        for (j = 0; j < 16; j= j+1) begin
             cross_corr_buf[j] <= 0;
         end
         do_clear();
         state <= S_SKIPPING;
-        fft_din_data_tlast <= 1'b0;
     end else if (enable) begin
         if (sample_in_strobe && state != S_SKIPPING) begin
             in_waddr <= in_waddr + 1;
@@ -327,25 +236,50 @@ always @(posedge clock) begin
                     addr1 <= in_raddr - 1;
                 end
 
-                if (num_sample >= 88) begin
-                    long_preamble_detected <= 1;
+                if (num_sample >= 64) begin
                     num_sample <= 0;
-                    mult_strobe <= 0;
-                    sum_stb <= 0;
-                    // offset it by the length of cross correlation buffer
-                    // size
-                    in_raddr <= addr1 - 32;
-                    num_input_consumed <= addr1 - 32;
-                    in_offset <= 0;
-                    num_ofdm_symbol <= 0;
-                    phase_correction <= 0;
-                    next_phase_correction <= phase_offset;
-                    phase_offset_taken <= phase_offset;
-                    state <= S_FFT;
+                    addr2 <= 0;
+                    state <= S_WAIT_FOR_SECOND_PEAK;
                 end else if (metric_stb) begin
                     num_sample <= num_sample + 1;
                 end
 
+            end
+
+            S_WAIT_FOR_SECOND_PEAK: begin
+                do_mult();
+
+                if (metric_stb && (metric > metric_max2)) begin
+                    metric_max2 <= metric;
+                    addr2 <= in_raddr - 1;
+                end
+                gap <= addr2 - addr1;
+
+                if (num_sample >= 64) begin
+                    `ifdef DEBUG_PRINT
+                        $display("PEAK GAP: %d (%d - %d)", gap, addr2, addr1);
+                        $display("PHASE OFFSET: %d", phase_offset);
+                    `endif
+                    if (gap > 62 && gap < 66) begin
+                        long_preamble_detected <= 1;
+                        num_sample <= 0;
+                        mult_strobe <= 0;
+                        sum_stb <= 0;
+                        // offset it by the length of cross correlation buffer
+                        // size
+                        in_raddr <= addr1 - 16;
+                        num_input_consumed <= addr1 - 16;
+                        in_offset <= 0;
+                        num_ofdm_symbol <= 0;
+                        phase_correction <= 0;
+                        next_phase_correction <= phase_offset;
+                        state <= S_FFT;
+                    end else begin
+                        state <= S_IDLE;
+                    end
+                end else if (metric_stb) begin
+                    num_sample <= num_sample + 1;
+                end
             end
 
             S_FFT: begin
@@ -356,7 +290,7 @@ always @(posedge clock) begin
                     long_preamble_detected <= 0;
                 end
 
-                if (~fft_loading && num_input_avail > 88) begin
+                if (~fft_loading && num_input_avail > 64) begin
                     fft_start <= 1;
                     in_offset <= 0;
                 end
@@ -371,43 +305,26 @@ always @(posedge clock) begin
                     if (phase_offset > 0) begin
                         if (next_phase_correction > PI) begin
                             phase_correction <= next_phase_correction - DOUBLE_PI;
-                            if(in_offset == 63 && num_ofdm_symbol > 0)
-                                next_phase_correction <= next_phase_correction - DOUBLE_PI + phase_offset + (short_gi ? phase_offset<<<3 : phase_offset<<<4);
-                            else
-                                next_phase_correction <= next_phase_correction - DOUBLE_PI + phase_offset;
+                            next_phase_correction <= next_phase_correction + phase_offset - DOUBLE_PI;
                         end else begin
                             phase_correction <= next_phase_correction;
-                            if(in_offset == 63 && num_ofdm_symbol > 0)
-                                next_phase_correction <= next_phase_correction + phase_offset + (short_gi ? phase_offset<<<3 : phase_offset<<<4);
-                            else
-                                next_phase_correction <= next_phase_correction + phase_offset;
+                            next_phase_correction <= next_phase_correction + phase_offset;
                         end
                     end else begin
                         if (next_phase_correction < -PI) begin
                             phase_correction <= next_phase_correction + DOUBLE_PI;
-                            if(in_offset == 63 && num_ofdm_symbol > 0)
-                                next_phase_correction <= next_phase_correction + DOUBLE_PI + phase_offset + (short_gi ? phase_offset<<<3 : phase_offset<<<4);
-                            else
-                                next_phase_correction <= next_phase_correction + DOUBLE_PI + phase_offset;
+                            phase_correction <= next_phase_correction + DOUBLE_PI + phase_offset;
                         end else begin
                             phase_correction <= next_phase_correction;
-                            if(in_offset == 63 && num_ofdm_symbol > 0)
-                                next_phase_correction <= next_phase_correction + phase_offset + (short_gi ? phase_offset<<<3 : phase_offset<<<4);
-                            else
-                                next_phase_correction <= next_phase_correction + phase_offset;
+                            phase_correction <= next_phase_correction + phase_offset;
                         end
                     end
                 end
 
                 if (fft_start | fft_loading) begin
                     in_offset <= in_offset + 1;
-                    
-                    if( in_offset == 62) begin
-                        fft_din_data_tlast <= 1'b1;
-                    end
 
                     if (in_offset == 63) begin
-                        fft_din_data_tlast <= 1'b0;
                         fft_loading <= 0;
                         num_ofdm_symbol <= num_ofdm_symbol + 1;
                         if (num_ofdm_symbol > 0) begin
@@ -443,9 +360,9 @@ end
 integer do_mult_i;
 task do_mult; begin
     // cross correlation of the first 16 samples of LTS
-    if (sample_in_strobe) begin
-        cross_corr_buf[31] <= sample_in;
-        for (do_mult_i = 0; do_mult_i < 31; do_mult_i = do_mult_i+1) begin
+    if (sample_in_strobe) begin  //移位寄存//因为sample_in_strobe比较慢
+        cross_corr_buf[15] <= sample_in;
+        for (do_mult_i = 0; do_mult_i < 15; do_mult_i = do_mult_i+1) begin
             cross_corr_buf[do_mult_i] <= cross_corr_buf[do_mult_i+1];
         end
 
@@ -458,82 +375,66 @@ task do_mult; begin
         stage_X1 <= cross_corr_buf[2];
         stage_X2 <= cross_corr_buf[3];
         stage_X3 <= cross_corr_buf[4];
-        stage_X4 <= cross_corr_buf[5];
-        stage_X5 <= cross_corr_buf[6];
-        stage_X6 <= cross_corr_buf[7];
-        stage_X7 <= cross_corr_buf[8];
 
-        stage_Y0 <= { 16'd156, 16'd0};
-        stage_Y1 <= {-16'd5,   16'd120};
-        stage_Y2 <= { 16'd40,  16'd111};
-        stage_Y3 <= { 16'd97, -16'd83};
-        stage_Y4 <= { 16'd21, -16'd28};
-        stage_Y5 <= { 16'd60,  16'd88};
-        stage_Y6 <= {-16'd115, 16'd55};
-        stage_Y7 <= {-16'd38,  16'd106};
+        stage_Y0[31:16] <= 156;  // 长头的时域数值
+        stage_Y0[15:0] <= 0;
+        stage_Y1[31:16] <= -5;
+        stage_Y1[15:0] <= 120;
+        stage_Y2[31:16] <= 40;
+        stage_Y2[15:0] <= 111;
+        stage_Y3[31:16] <= 97;
+        stage_Y3[15:0] <= -83;
 
         mult_strobe <= 1;
         mult_stage <= 1;
     end
 
     if (mult_stage == 1) begin
+        stage_X0 <= cross_corr_buf[4];
+        stage_X1 <= cross_corr_buf[5];
+        stage_X2 <= cross_corr_buf[6];
+        stage_X3 <= cross_corr_buf[7];
+
+        stage_Y0[31:16] <= 21;
+        stage_Y0[15:0] <= -28;
+        stage_Y1[31:16] <= 60;
+        stage_Y1[15:0] <= 88;
+        stage_Y2[31:16] <= -115;
+        stage_Y2[15:0] <= 55;
+        stage_Y3[31:16] <= -38;
+        stage_Y3[15:0] <= 106;
+
+        mult_stage <= 2;
+    end else if (mult_stage == 2) begin
         stage_X0 <= cross_corr_buf[8];
         stage_X1 <= cross_corr_buf[9];
         stage_X2 <= cross_corr_buf[10];
         stage_X3 <= cross_corr_buf[11];
-        stage_X4 <= cross_corr_buf[12];
-        stage_X5 <= cross_corr_buf[13];
-        stage_X6 <= cross_corr_buf[14];
-        stage_X7 <= cross_corr_buf[15];
 
-        stage_Y0 <= { 16'd98,  16'd26};
-        stage_Y1 <= { 16'd53, -16'd4};
-        stage_Y2 <= { 16'd1,   16'd115};
-        stage_Y3 <= {-16'd137, 16'd47};
-        stage_Y4 <= { 16'd24,  16'd59};
-        stage_Y5 <= { 16'd59,  16'd15};
-        stage_Y6 <= {-16'd22, -16'd161};
-        stage_Y7 <= { 16'd119, 16'd4};
-
-        mult_stage <= 2;
-    end else if (mult_stage == 2) begin
-        stage_X0 <= cross_corr_buf[16];
-        stage_X1 <= cross_corr_buf[17];
-        stage_X2 <= cross_corr_buf[18];
-        stage_X3 <= cross_corr_buf[19];
-        stage_X4 <= cross_corr_buf[20];
-        stage_X5 <= cross_corr_buf[21];
-        stage_X6 <= cross_corr_buf[22];
-        stage_X7 <= cross_corr_buf[23];
-
-        stage_Y0 <= { 16'd62,    16'd62};
-        stage_Y1 <= { 16'd37,  -16'd98};
-        stage_Y2 <= {-16'd57,  -16'd39};
-        stage_Y3 <= {-16'd131, -16'd65};
-        stage_Y4 <= { 16'd82,  -16'd92};
-        stage_Y5 <= { 16'd70,  -16'd14};
-        stage_Y6 <= {-16'd60,  -16'd81};
-        stage_Y7 <= {-16'd56,   16'd22};
+        stage_Y0[31:16] <= 98;
+        stage_Y0[15:0] <= 26;
+        stage_Y1[31:16] <= 53;
+        stage_Y1[15:0] <= -4;
+        stage_Y2[31:16] <= 1;
+        stage_Y2[15:0] <= 115;
+        stage_Y3[31:16] <= -137;
+        stage_Y3[15:0] <= 47;
 
         mult_stage <= 3;
     end else if (mult_stage == 3) begin
-        stage_X0 <= cross_corr_buf[24];
-        stage_X1 <= cross_corr_buf[25];
-        stage_X2 <= cross_corr_buf[26];
-        stage_X3 <= cross_corr_buf[27];
-        stage_X4 <= cross_corr_buf[28];
-        stage_X5 <= cross_corr_buf[29];
-        stage_X6 <= cross_corr_buf[30];
-        stage_X7 <= cross_corr_buf[31];
+        stage_X0 <= cross_corr_buf[12];
+        stage_X1 <= cross_corr_buf[13];
+        stage_X2 <= cross_corr_buf[14];
+        stage_X3 <= cross_corr_buf[15];
 
-        stage_Y0 <= {-16'd35,  16'd151};
-        stage_Y1 <= {-16'd122, 16'd17};
-        stage_Y2 <= {-16'd127, 16'd21};
-        stage_Y3 <= { 16'd75,  16'd74};
-        stage_Y4 <= {-16'd3,  -16'd54};
-        stage_Y5 <= {-16'd92, -16'd115};
-        stage_Y6 <= { 16'd92, -16'd106};
-        stage_Y7 <= { 16'd12, -16'd98};
+        stage_Y0[31:16] <= 24;
+        stage_Y0[15:0] <= 59;
+        stage_Y1[31:16] <= 59;
+        stage_Y1[15:0] <= 15;
+        stage_Y2[31:16] <= -22;
+        stage_Y2[15:0] <= -161;
+        stage_Y3[31:16] <= 119;
+        stage_Y3[15:0] <= 4;
 
         mult_stage <= 4;
     end else if (mult_stage == 4) begin
@@ -559,6 +460,7 @@ end
 endtask
 
 task do_clear; begin
+    gap <= 0;
 
     in_waddr <= 0;
     in_raddr <= 0;
@@ -580,6 +482,8 @@ task do_clear; begin
 
     metric_max1 <= 0;
     addr1 <= 0;
+    metric_max2 <= 0;
+    addr2 <= 0;
 
     mult_stage <= 0;
 
@@ -597,19 +501,11 @@ task do_clear; begin
     stage_X1 <= 0;
     stage_X2 <= 0;
     stage_X3 <= 0;
-    stage_X4 <= 0;
-    stage_X5 <= 0;
-    stage_X6 <= 0;
-    stage_X7 <= 0;
 
     stage_Y0 <= 0;
     stage_Y1 <= 0;
     stage_Y2 <= 0;
     stage_Y3 <= 0;
-    stage_Y4 <= 0;
-    stage_Y5 <= 0;
-    stage_Y6 <= 0;
-    stage_Y7 <= 0;
 end
 endtask
 

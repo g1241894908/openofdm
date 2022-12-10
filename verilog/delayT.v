@@ -1,4 +1,5 @@
 module delayT
+// 延迟数据
 #(
     parameter DATA_WIDTH = 32,
     parameter DELAY = 1

@@ -5,21 +5,23 @@ module sync_short (
     input reset,
     input enable,
 
-    input [31:0] min_plateau,
+    input set_stb,
+    input [7:0] set_addr,
+    input [31:0] set_data,
 
     input [31:0] sample_in,
     input sample_in_strobe,
 
     output reg short_preamble_detected,
 
-    input [15:0] phase_out,
+    input [31:0] phase_out, //实时输出phase_in_i相位，由phase模块求算出arctan角度，重新输入
     input phase_out_stb,
 
     output [31:0] phase_in_i,
     output [31:0] phase_in_q,
     output phase_in_stb,
 
-    output reg signed [15:0] phase_offset
+    output reg signed [31:0] phase_offset  // 当短头检测到了，将频偏角度记录保存输出
 );
 `include "common_params.v"
 
@@ -52,8 +54,7 @@ wire [31:0] freq_offset_i;
 wire [31:0] freq_offset_q;
 wire freq_offset_stb;
 
-reg [15:0] phase_out_neg;
-reg [15:0] phase_offset_neg;
+reg [31:0] phase_out_neg;
 
 wire [31:0] delay_prod_avg_mag;
 wire delay_prod_avg_mag_stb;
@@ -70,71 +71,14 @@ reg [31:0] neg_count;
 reg [31:0] min_neg;
 reg has_neg;
 
-//wire [31:0] min_plateau;
+wire [31:0] min_plateau;
 
 // minimal number of samples that has to exceed plateau threshold to claim
 // a short preamble
-/*setting_reg #(.my_addr(SR_MIN_PLATEAU), .width(32), .at_reset(100)) sr_0 (
+setting_reg #(.my_addr(SR_MIN_PLATEAU), .width(32), .at_reset(100)) sr_0 (
     .clk(clock), .rst(reset), .strobe(set_stb), .addr(set_addr), .in(set_data),
-    .out(min_plateau), .changed());*/
+    .out(min_plateau), .changed());
 
-/*
-// =============save signal to file for matlab bit-true comparison===========
-integer file_open_trigger = 0;
-integer mag_sq_fd, mag_sq_avg_fd, prod_fd, prod_avg_fd, phase_in_fd, phase_out_fd, delay_prod_avg_mag_fd;
-wire signed [31:0] prod_i, prod_q, prod_avg_i, prod_avg_q, phase_in_i_signed, phase_in_q_signed;
-wire signed [15:0] phase_out_signed;
-assign prod_i = prod[63:32];
-assign prod_q = prod[31:0];
-assign prod_avg_i = prod_avg[63:32];
-assign prod_avg_q = prod_avg[31:0];
-assign phase_in_i_signed = phase_in_i;
-assign phase_in_q_signed = phase_in_q;
-assign phase_out_signed = phase_out;
-
-always @(posedge clock) begin
-    file_open_trigger = file_open_trigger + 1;
-    if (file_open_trigger==1) begin
-        mag_sq_fd = $fopen("./mag_sq.txt", "w");
-        mag_sq_avg_fd = $fopen("./mag_sq_avg.txt", "w");
-        prod_fd = $fopen("./prod.txt", "w");
-        prod_avg_fd = $fopen("./prod_avg.txt", "w");
-        phase_in_fd = $fopen("./phase_in.txt", "w");
-        phase_out_fd = $fopen("./phase_out.txt", "w");
-        delay_prod_avg_mag_fd = $fopen("./delay_prod_avg_mag.txt", "w");
-    end
-
-    if (mag_sq_stb && enable && (~reset) ) begin
-        $fwrite(mag_sq_fd, "%d\n", mag_sq);
-        $fflush(mag_sq_fd);
-    end
-    if (mag_sq_avg_stb && enable && (~reset) ) begin
-        $fwrite(mag_sq_avg_fd, "%d\n", mag_sq_avg);
-        $fflush(mag_sq_avg_fd);
-    end
-    if (prod_stb && enable && (~reset) ) begin
-        $fwrite(prod_fd, "%d %d\n", prod_i, prod_q);
-        $fflush(prod_fd);
-    end
-    if (prod_avg_stb && enable && (~reset) ) begin
-        $fwrite(prod_avg_fd, "%d %d\n", prod_avg_i, prod_avg_q);
-        $fflush(prod_avg_fd);
-    end
-    if (phase_in_stb && enable && (~reset) ) begin
-        $fwrite(phase_in_fd, "%d %d\n", phase_in_i_signed, phase_in_q_signed);
-        $fflush(phase_in_fd);
-    end
-    if (phase_out_stb && enable && (~reset) ) begin
-        $fwrite(phase_out_fd, "%d\n", phase_out_signed);
-        $fflush(phase_out_fd);
-    end
-    if (delay_prod_avg_mag_stb && enable && (~reset) ) begin
-        $fwrite(delay_prod_avg_mag_fd, "%d\n", delay_prod_avg_mag);
-        $fflush(delay_prod_avg_mag_fd);
-    end
-end
-// ==========end of save signal to file for matlab bit-true comparison===========
-*/
 
 complex_to_mag_sq mag_sq_inst (
     .clock(clock),
@@ -160,7 +104,7 @@ moving_avg #(.DATA_WIDTH(32), .WINDOW_SHIFT(WINDOW_SHIFT)) mag_sq_avg_inst (
     .output_strobe(mag_sq_avg_stb)
 );
 
-delay_sample #(.DATA_WIDTH(32), .DELAY_SHIFT(DELAY_SHIFT)) sample_delayed_inst (
+delay_sample #(.DATA_WIDTH(32), .DELAY_SHIFT(DELAY_SHIFT)) sample_delayed_inst (//延迟16拍，准备与过去的数据自相关
     .clock(clock),
     .enable(enable),
     .reset(reset),
@@ -266,13 +210,12 @@ always @(posedge clock) begin
         sample_delayed_conj[31:16] <= sample_delayed[31:16];
         sample_delayed_conj[15:0] <= ~sample_delayed[15:0]+1;
 
-        min_pos <= min_plateau>>2;
+        min_pos <= min_plateau>>2;  //25%
         min_neg <= min_plateau>>2;
         has_pos <= pos_count > min_pos;
         has_neg <= neg_count > min_neg;
 
         phase_out_neg <= ~phase_out + 1;
-        phase_offset_neg <= {{4{phase_out[15]}}, phase_out[15:4]};
 
         prod_thres <= {1'b0, mag_sq_avg[31:1]} + {2'b0, mag_sq_avg[31:2]};
         
@@ -288,10 +231,7 @@ always @(posedge clock) begin
                     pos_count <= 0;
                     neg_count <= 0;
                     short_preamble_detected <= has_pos & has_neg;
-                    if(phase_out_neg[3] == 0)  // E.g. 131/16 = 8.1875 -> 8, -138/16 = -8.625 -> -9
-                        phase_offset <= {{4{phase_out_neg[15]}}, phase_out_neg[15:4]};
-                    else  // E.g. -131/16 = -8.1875 -> -8, 138/16 = 8.625 -> 9
-                        phase_offset <= ~phase_offset_neg + 1;
+                    phase_offset <= {{4{phase_out_neg[31]}}, phase_out_neg[31:4]};
                 end else begin
                     plateau_count <= plateau_count + 1;
                     short_preamble_detected <= 0;
