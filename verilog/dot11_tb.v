@@ -8,6 +8,7 @@ reg reset;
 reg enable;
 
 reg[31:0] sample_in;
+reg[31:0] rx2_sample_in;
 reg sample_in_strobe;
 reg [15:0] clk_count;
 
@@ -58,6 +59,7 @@ reg [31:0] set_data;
 localparam RAM_SIZE = 1<<25;
 
 reg [31:0] ram [0:RAM_SIZE-1];
+reg [31:0] ram2 [0:RAM_SIZE-1];
 reg [31:0] addr;
 
 integer bb_sample_fd;
@@ -82,10 +84,11 @@ integer byte_out_fd;
 `ifndef SAMPLE_FILE
 //`define SAMPLE_FILE "../testing_inputs/conducted/dot11a_24mbps_qos_data_e4_90_7e_15_2a_16_e8_de_27_90_6e_42.txt"
 `define SAMPLE_FILE "../testing_inputs/conducted/WifiRawData.txt"
+`define SAMPLE_FILE2 "../testing_inputs/conducted/WifiRawData2.txt"
 `endif 
 
-`ifndef NUM_SAMPLE
-`define NUM_SAMPLE 2100
+`ifndef NUM_SAMPLE 
+`define NUM_SAMPLE 600
 `endif
 
 initial begin
@@ -95,6 +98,7 @@ initial begin
     $display("Reading memory from...");
     $display(`SAMPLE_FILE);
     $readmemh(`SAMPLE_FILE, ram);
+    $readmemh(`SAMPLE_FILE2, ram2);
     $display("Done.");
 
     clock = 0;
@@ -142,6 +146,7 @@ end
 always @(posedge clock) begin
     if (reset) begin
         sample_in <= 0;
+        rx2_sample_in <= 0;
         clk_count <= 0;
         sample_in_strobe <= 0;
         addr <= 0;
@@ -149,6 +154,7 @@ always @(posedge clock) begin
         if (clk_count == 4) begin
             sample_in_strobe <= 1;
             sample_in <= ram[addr];
+            rx2_sample_in <= ram2[addr];
             addr <= addr + 1;
             clk_count <= 0;
         end else begin
@@ -178,11 +184,10 @@ always @(posedge clock) begin
                 $display("%d / %d", addr, RAM_SIZE);
             end
 
-            if (addr == `NUM_SAMPLE) begin
-                $finish;
-            end
         end
-
+        if (addr == `NUM_SAMPLE) begin
+            $finish;
+        end
 //*        if (sync_long_metric_stb) begin
 //*            $fwrite(sync_long_metric_fd, "%d %d\n", $time/2, sync_long_metric);
 //*        end
@@ -241,6 +246,7 @@ dot11 dot11_inst (
     .set_data(set_data),
 
     .sample_in(sample_in),
+    .rx2_sample_in(rx2_sample_in),
     .sample_in_strobe(sample_in_strobe),
 
     .state(dot11_state),

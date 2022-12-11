@@ -8,6 +8,7 @@ module sync_long (
     input [31:0] set_data,
 
     input [31:0] sample_in,
+    input [31:0] rx2_sample_in,
     input sample_in_strobe,
     input signed [31:0] phase_offset,  //短头计算出的相偏
     input short_gi,   //**!!!**暂时不理解
@@ -20,6 +21,7 @@ module sync_long (
     output reg long_preamble_detected,
 
     output reg [31:0] sample_out,
+    output reg [31:0] rx2_sample_out,
     output reg sample_out_strobe,
 
     output reg [2:0] state
@@ -87,27 +89,27 @@ reg [31:0] stage_Y2;
 reg [31:0] stage_Y3;
 
 stage_mult stage_mult_inst ( //分4拍求出16点的相关和
-    .clock(clock),
+    .clock (clock),
     .enable(enable),
-    .reset(reset),
+    .reset (reset),
 
     .X0(stage_X0[31:16]),
-    .X1(stage_X0[15:0]),
+    .X1(stage_X0[15:0] ),
     .X2(stage_X1[31:16]),
-    .X3(stage_X1[15:0]),
+    .X3(stage_X1[15:0] ),
     .X4(stage_X2[31:16]),
-    .X5(stage_X2[15:0]),
+    .X5(stage_X2[15:0] ),
     .X6(stage_X3[31:16]),
-    .X7(stage_X3[15:0]),
+    .X7(stage_X3[15:0] ),
 
     .Y0(stage_Y0[31:16]),
-    .Y1(stage_Y0[15:0]),
+    .Y1(stage_Y0[15:0] ),
     .Y2(stage_Y1[31:16]),
-    .Y3(stage_Y1[15:0]),
+    .Y3(stage_Y1[15:0] ),
     .Y4(stage_Y2[31:16]),
-    .Y5(stage_Y2[15:0]),
+    .Y5(stage_Y2[15:0] ),
     .Y6(stage_Y3[31:16]),
-    .Y7(stage_Y3[15:0]),
+    .Y7(stage_Y3[15:0] ),
 
     .input_strobe(mult_strobe),
 
@@ -121,23 +123,32 @@ localparam S_WAIT_FOR_SECOND_PEAK = 2;
 localparam S_IDLE = 3;
 localparam S_FFT = 4;
 
-reg fft_start;
+reg  fft_start;
 wire fft_start_delayed;
 wire fft_in_stb;
-reg fft_loading;
+reg  fft_loading;
+
 wire signed [15:0] fft_in_re;
 wire signed [15:0] fft_in_im;
+wire signed [15:0] rx2_fft_in_re;
+wire signed [15:0] rx2_fft_in_im;
+
 wire [22:0] fft_out_re;
 wire [22:0] fft_out_im;
+wire [22:0] rx2_fft_out_re;
+wire [22:0] rx2_fft_out_im;
 wire fft_ready;
 wire fft_done;
 wire fft_busy;
 wire fft_valid;
 
 wire [31:0] fft_out = {fft_out_re[22:7], fft_out_im[22:7]};
+wire [31:0] rx2_fft_out = {rx2_fft_out_re[22:7], rx2_fft_out_im[22:7]};
 
 wire signed [15:0] raw_i;
 wire signed [15:0] raw_q;
+wire signed [15:0] rx2_raw_i;
+wire signed [15:0] rx2_raw_q;
 reg raw_stb;
 
 ram_2port  #(.DWIDTH(32), .AWIDTH(IN_BUF_LEN_SHIFT)) in_buf (
@@ -153,6 +164,21 @@ ram_2port  #(.DWIDTH(32), .AWIDTH(IN_BUF_LEN_SHIFT)) in_buf (
     .addrb(in_raddr),
     .dib(32'hFFFF),
     .dob({raw_i, raw_q})
+);
+
+ram_2port  #(.DWIDTH(32), .AWIDTH(IN_BUF_LEN_SHIFT)) in_buf_2 (
+    .clka(clock),
+    .ena(1),
+    .wea(sample_in_strobe),
+    .addra(in_waddr),
+    .dia(rx2_sample_in),
+    .doa(),
+    .clkb(clock),
+    .enb(fft_start | fft_loading),
+    .web(1'b0),
+    .addrb(in_raddr),
+    .dib(32'hFFFF),
+    .dob({rx2_raw_i, rx2_raw_q})
 );
 
 rotate rotate_inst (
@@ -173,6 +199,24 @@ rotate rotate_inst (
     .output_strobe(fft_in_stb)
 );
 
+rotate rotate_inst_2 (
+    .clock(clock),
+    .enable(enable),
+    .reset(reset),
+
+    .in_i(rx2_raw_i),
+    .in_q(rx2_raw_q),
+    .phase(phase_correction),
+    .input_strobe(raw_stb),
+
+    .rot_addr(        ),
+    .rot_data(rot_data),
+    
+    .out_i(rx2_fft_in_re),
+    .out_q(rx2_fft_in_im),
+    .output_strobe(       )
+);
+
 delayT #(.DATA_WIDTH(1), .DELAY(9)) fft_delay_inst (
     .clock(clock),
     .reset(reset),
@@ -180,7 +224,6 @@ delayT #(.DATA_WIDTH(1), .DELAY(9)) fft_delay_inst (
     .data_in(fft_start),
     .data_out(fft_start_delayed)
 );
-
 
 xfft_v7_1 dft_inst (
     .clk(clock),
@@ -196,6 +239,22 @@ xfft_v7_1 dft_inst (
     .done(fft_done),
     .busy(fft_busy),
     .dv(fft_valid)
+);
+
+xfft_v7_1 dft_inst_2 (
+    .clk(clock),
+    .fwd_inv(1),
+    .start(fft_start_delayed),
+    .fwd_inv_we(1),
+
+    .xn_re(rx2_fft_in_re),
+    .xn_im(rx2_fft_in_im),
+    .xk_re(rx2_fft_out_re),
+    .xk_im(rx2_fft_out_im),
+    .rfd( ),
+    .done( ),
+    .busy( ),
+    .dv( )
 );
 
 reg [15:0] num_sample;
@@ -343,6 +402,7 @@ always @(posedge clock) begin
 
                 sample_out_strobe <= fft_valid;
                 sample_out <= fft_out;
+                rx2_sample_out <= rx2_fft_out;
             end
 
             S_IDLE: begin

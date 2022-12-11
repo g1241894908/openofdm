@@ -8,7 +8,7 @@ nonHTCfg = wlanNonHTConfig('Modulation', 'OFDM', ...
     'MCS', 4, ...
     'PSDULength', 1);
 
-numPackets = 10;
+numPackets = 1;
 % input bit source:
 in = randi([0, 1], 1000, 1);
 
@@ -22,8 +22,32 @@ waveform = wlanWaveformGenerator(in, nonHTCfg, ...
 
 Fs = wlanSampleRate(nonHTCfg); 								 % sample rate of waveform
 
+
+
+
+%% channel estimate
+
+  %channel 1
+  
+  for frame=1:20 %%连续10帧
+      for sample =1:680
+          waveform1((frame-1)*680+sample) = exp(-sqrt(-1)*0.006)*exp(-sqrt(-1)*0.005*sample)* ...
+                         (  1/32 * exp(-sqrt(-1)*0.0032)*waveform(sample) +...
+                            0.9 * exp(-sqrt(-1)*2*pi*(5+0.0018*frame)/0.06)*waveform(sample)     );
+      end
+  end
+  %channel 2
+  
+  for frame=1:20 %%连续10帧
+      for sample =1:680
+          waveform2((frame-1)*680+sample) = exp(-sqrt(-1)*0.006)*exp(-sqrt(-1)*0.005*sample)* ...
+                         (  1/36 * exp(-sqrt(-1)*0.003)*waveform(sample) +...
+                            0.90072 * exp(-sqrt(-1)*2*pi*(5+0.0018*frame)*1.0002/0.06)*waveform(sample)     );
+      end
+  end
+
 %% generate the random number
-dat   = waveform/3;
+dat   = waveform1/3;
 M     = real(dat);
 M_img = imag(dat);
 
@@ -67,12 +91,50 @@ for i = 1: N
 end
 fclose(fid);
 
+%% generate the random number
+dat   = waveform2/3;
+M     = real(dat);
+M_img = imag(dat);
 
-%% 
+N = length(M);
+Coeff_width = 16;
+% convert the fraction number to integer
+% 20 bits with 1 signed bit
+M_img_mul = round(M_img.*2^(Coeff_width-1));
+% convert the coefficient to complement format
+for i = 1: N
+    if(M_img_mul(i) < 0)
+        comple_img_M(i) = 2^Coeff_width + M_img_mul(i);
+    else
+        comple_img_M(i) = M_img_mul(i);
+    end
+end
 
+M_mul = round(M.*2^(Coeff_width-1));
+% convert the coefficient to complement format
+for i = 1: N
+    if(M_mul(i) < 0)
+        comple_M(i) = 2^Coeff_width + M_mul(i);
+    else
+        comple_M(i) = M_mul(i);
+    end
+end
+%% write the real part .coe file
+fid = fopen('WifiRawData2.txt','w');%File storage path
 
-
-
+% convert the complement format to hex format
+for i = 1: N
+    hex_M     = dec2hex(comple_M(i),4);              % 5 bits HEX = 20 bits binary
+    hex_img_M = dec2hex(comple_img_M(i),4);     
+    for j=1:4
+        fprintf(fid,'%s',hex_M(j));                  % print 5 bits hex data
+    end
+    for j=1:4
+        fprintf(fid,'%s',hex_img_M(j));              % print 5 bits hex data
+    end
+        fprintf(fid,'\n');
+end
+fclose(fid);
 
 
 

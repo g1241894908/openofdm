@@ -7,6 +7,7 @@ module equalizer
     input reset,
 
     input [31:0] sample_in,
+    input [31:0] rx2_sample_in ,
     input sample_in_strobe,
     input ht_next,
 
@@ -15,6 +16,10 @@ module equalizer
     output reg phase_in_stb,
     input [31:0] phase_out,
     input phase_out_stb,
+
+    output [31:0] rx1_csi_out,
+    output [31:0] rx2_csi_out,
+    output        csi_out_stb,
 
     output [`ROTATE_LUT_LEN_SHIFT-1:0] rot_addr,
     input [31:0] rot_data,
@@ -80,11 +85,15 @@ reg [3:0] pilot_count;
 
 reg signed [15:0] input_i;
 reg signed [15:0] input_q;
+reg signed [15:0] rx2_input_i;
+reg signed [15:0] rx2_input_q;
 
 reg current_sign;
 
 wire signed [15:0] new_lts_i;
 wire signed [15:0] new_lts_q;
+wire signed [15:0] rx2_new_lts_i;
+wire signed [15:0] rx2_new_lts_q;
 wire new_lts_stb;
 
 reg calc_mean_strobe;
@@ -93,9 +102,14 @@ reg [5:0] lts_waddr;
 reg [6:0] lts_raddr; // one bit wider to detect overflow
 reg [15:0] lts_i_in;
 reg [15:0] lts_q_in;
+reg [15:0] rx2_lts_i_in;
+reg [15:0] rx2_lts_q_in;
 reg lts_in_stb;
 wire signed [15:0] lts_i_out;
 wire signed [15:0] lts_q_out;
+wire signed [15:0] rx2_lts_i_out;
+wire signed [15:0] rx2_lts_q_out;
+
 wire signed [15:0] lts_q_out_neg = ~lts_q_out + 1;
 
 reg [5:0] in_waddr;
@@ -135,6 +149,12 @@ wire norm_out_stb;
 reg prod_in_strobe;
 wire prod_out_strobe;
 
+
+assign rx1_csi_out =  {new_lts_i , new_lts_q}  ;
+assign rx2_csi_out =  {rx2_new_lts_i , rx2_new_lts_q}  ;
+assign csi_out_stb = new_lts_stb ;
+
+
 ram_2port #(.DWIDTH(32), .AWIDTH(6)) lts_inst (
     .clka(clock),
     .ena(1),
@@ -150,6 +170,45 @@ ram_2port #(.DWIDTH(32), .AWIDTH(6)) lts_inst (
     .dob({lts_i_out, lts_q_out})
 );
 
+ram_2port #(.DWIDTH(32), .AWIDTH(6)) lts_inst2 (
+    .clka(clock),
+    .ena(1),
+    .wea(lts_in_stb),
+    .addra(lts_waddr),
+    .dia({rx2_lts_i_in, rx2_lts_q_in}),
+    .doa(),
+    .clkb(clock),
+    .enb(1),
+    .web(1'b0),
+    .addrb(lts_raddr[5:0]),
+    .dib(32'hFFFF),
+    .dob({rx2_lts_i_out, rx2_lts_q_out})
+);
+calc_mean lts_i_inst2 (    //**计算两个长前导的信道估计均值
+    .clock(clock),
+    .enable(enable),
+    .reset(reset),
+    
+    .a(rx2_lts_i_out),
+    .b(rx2_input_i),
+    .sign(current_sign),
+    .input_strobe(calc_mean_strobe),
+
+    .c(rx2_new_lts_i)
+);
+
+calc_mean lts_q_inst2 (
+    .clock(clock),
+    .enable(enable),
+    .reset(reset),
+    
+    .a(rx2_lts_q_out),
+    .b(rx2_input_q),
+    .sign(current_sign),
+    .input_strobe(calc_mean_strobe),
+
+    .c(rx2_new_lts_q)
+);
 calc_mean lts_i_inst (    //**计算两个长前导的信道估计均值
     .clock(clock),
     .enable(enable),
@@ -292,7 +351,8 @@ always @(posedge clock) begin
         lts_in_stb <= 0;
         lts_i_in <= 0;
         lts_q_in <= 0;
-
+        rx2_lts_i_in <= 0;
+        rx2_lts_q_in <= 0;
         ht <= 0;
         num_data_carrier <= 48;
 
@@ -324,6 +384,8 @@ always @(posedge clock) begin
         current_sign <= 0;
         input_i <= 0;
         input_q <= 0;
+        rx2_input_i <= 0;
+        rx2_input_q <= 0;
         calc_mean_strobe <= 0;
 
         num_output <= 0;
@@ -335,7 +397,7 @@ always @(posedge clock) begin
                 // store first LTS as is
                 lts_in_stb <= sample_in_strobe;
                 {lts_i_in, lts_q_in} <= sample_in;
-
+                {rx2_lts_i_in, rx2_lts_q_in} <= rx2_sample_in;
                 if (lts_in_stb) begin
                     if (lts_waddr == 63) begin
                         lts_waddr <= 0;
@@ -352,6 +414,7 @@ always @(posedge clock) begin
                 if (sample_in_strobe) begin
                     calc_mean_strobe <= sample_in_strobe;
                     {input_i, input_q} <= sample_in;
+                    {rx2_input_i, rx2_input_q} <= rx2_sample_in;
                     current_sign <= lts_ref[0];
                     lts_ref <= {lts_ref[0], lts_ref[63:1]};
                     lts_raddr <= lts_raddr + 1;
@@ -399,6 +462,8 @@ always @(posedge clock) begin
                 in_raddr <= 0;
                 input_i <= 0;
                 input_q <= 0;
+                rx2_input_i <= 0;
+                rx2_input_q <= 0;
                 lts_raddr <= 0;
                 state <= S_CALC_FREQ_OFFSET;
             end
@@ -508,9 +573,12 @@ always @(posedge clock) begin
                     ht_lts_ref <= {ht_lts_ref[0], ht_lts_ref[63:1]};
                     if (ht_lts_ref[0] == 0) begin
                         {lts_i_in, lts_q_in} <= sample_in;
+                        {rx2_lts_i_in, rx2_lts_q_in} <= rx2_sample_in;
                     end else begin
                         lts_i_in <= ~sample_in[31:16]+1;
                         lts_q_in <= ~sample_in[15:0]+1;
+                        rx2_lts_i_in <= ~rx2_sample_in[31:16]+1;
+                        rx2_lts_q_in <= ~rx2_sample_in[15:0]+1;
                     end
                 end else begin
                     lts_in_stb <= 0;

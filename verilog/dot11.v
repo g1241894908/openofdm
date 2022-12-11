@@ -12,6 +12,7 @@ module dot11 (
 
     // INPUT: I/Q sample
     input [31:0] sample_in,
+    input [31:0] rx2_sample_in,
     input sample_in_strobe,
 
     // OUTPUT: bytes and FCS status
@@ -45,6 +46,7 @@ module dot11 (
     output sync_long_metric_stb,
     output long_preamble_detected,
     output [31:0] sync_long_out,
+    output [31:0] rx2_sync_long_out,
     output sync_long_out_strobe,
     output [2:0] sync_long_state,
 
@@ -302,6 +304,7 @@ sync_long sync_long_inst (
     .set_data(set_data),
 
     .sample_in(sample_in),
+    .rx2_sample_in(rx2_sample_in),
     .sample_in_strobe(sample_in_strobe),
     .phase_offset(phase_offset),
     .short_gi(short_gi),
@@ -315,7 +318,48 @@ sync_long sync_long_inst (
     .state(sync_long_state),
 
     .sample_out(sync_long_out),
+    .rx2_sample_out(rx2_sync_long_out),
     .sample_out_strobe(sync_long_out_strobe)
+);
+
+wire [31:0]  rx1_csi_out;
+wire [31:0]  rx2_csi_out;
+wire         csi_out_stb;
+wire [31:0]  csi_ratio_re_out ;
+wire [31:0]  csi_ratio_im_out ;
+wire         csi_ratio_stb ;
+
+always @(posedge clock) begin
+     if (csi_ratio_stb == 1) begin
+         `ifdef DEBUG_PRINT
+             $display("[CSI] RX_I = %0d,RX_Q = %0d, ", $signed(csi_ratio_re_out),$signed(csi_ratio_im_out) );
+         `endif
+    end
+end
+
+divider csi_ratio_re (
+    .clock(clock),
+    .enable(enable),
+    .reset(reset),
+
+    .dividend( {rx1_csi_out[31:16],16'b0} ),
+    .divisor( {rx2_csi_out[31:16],8'b0}),
+    .input_strobe(csi_out_stb),
+
+    .quotient(csi_ratio_re_out),
+    .output_strobe(csi_ratio_stb)
+);
+
+divider csi_ratio_im (
+    .clock(clock),
+    .enable(enable), 
+    .reset(reset),
+
+    .dividend( {rx1_csi_out[15:0],16'b0} ),
+    .divisor( {rx2_csi_out[15:0],8'b0}),
+    .input_strobe(csi_out_stb),
+
+    .quotient(csi_ratio_im_out)
 );
 
 equalizer equalizer_inst (
@@ -324,12 +368,16 @@ equalizer equalizer_inst (
     .enable(enable & equalizer_enable),
 
     .sample_in(sync_long_out),
+    .rx2_sample_in(rx2_sync_long_out),
     .sample_in_strobe(sync_long_out_strobe),
     .ht_next(ht_next),
 
     .phase_in_i(eq_phase_in_i),
     .phase_in_q(eq_phase_in_q),
     .phase_in_stb(eq_phase_in_stb),
+    .rx1_csi_out(rx1_csi_out),
+    .rx2_csi_out(rx2_csi_out),
+    .csi_out_stb(csi_out_stb),
 
     .phase_out(eq_phase_out),
     .phase_out_stb(eq_phase_out_stb),
