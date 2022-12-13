@@ -325,41 +325,32 @@ sync_long sync_long_inst (
 wire [31:0]  rx1_csi_out;
 wire [31:0]  rx2_csi_out;
 wire         csi_out_stb;
-wire [31:0]  csi_ratio_re_out ;
-wire [31:0]  csi_ratio_im_out ;
-wire         csi_ratio_stb ;
+wire         csi_ratio_stb;
+wire [31:0]  csi_ratio_re_out;
+wire [31:0]  csi_ratio_im_out;
 
 always @(posedge clock) begin
      if (csi_ratio_stb == 1) begin
          `ifdef DEBUG_PRINT
-             $display("[CSI] RX_I = %0d,RX_Q = %0d, ", $signed(rx2_csi_out[31:16]),$signed(rx2_csi_out[15:0]) );
+             $display("[CSI] RX_I = %0d,RX_Q = %0d, ", $signed(csi_ratio_re_out),$signed(csi_ratio_im_out );
          `endif
     end
 end
 
-divider csi_ratio_re (
+complex_div csi_ratio_inst (
     .clock(clock),
+    .reset(reset),
     .enable(enable),
-    .reset(reset),
+    
+    .a_i(rx1_csi_out[31:16]),
+    .a_q(rx1_csi_out[15:0]),
+    .b_i(rx2_csi_out[31:16]),
+    .b_q(rx2_csi_out[15:0]),
+    .input_strobe(valid_in),
 
-    .dividend( {rx1_csi_out[31:16],16'b0} ),
-    .divisor( {{8{rx2_csi_out[31]}},rx2_csi_out[31:16]}),
-    .input_strobe(csi_out_stb),
-
-    .quotient(csi_ratio_re_out),
+    .p_i(csi_ratio_re_out),
+    .p_q(csi_ratio_im_out),
     .output_strobe(csi_ratio_stb)
-);
-
-divider csi_ratio_im (
-    .clock(clock),
-    .enable(enable), 
-    .reset(reset),
-
-    .dividend( {rx1_csi_out[15:0],16'b0} ),
-    .divisor( {{8{rx2_csi_out[15]}},rx2_csi_out[15:0]}),
-    .input_strobe(csi_out_stb),
-
-    .quotient(csi_ratio_im_out)
 );
 
 equalizer equalizer_inst (
