@@ -88,12 +88,12 @@ integer byte_out_fd;
 `endif 
 
 `ifndef NUM_SAMPLE 
-`define NUM_SAMPLE 4100
+`define NUM_SAMPLE 8100
 `endif
 
 initial begin
-    //* $dumpfile("dot11.vcd");
-    //* $dumpvars;
+    $dumpfile("dot11.vcd");
+    $dumpvars;
 
     $display("Reading memory from...");
     $display(`SAMPLE_FILE);

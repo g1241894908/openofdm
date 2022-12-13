@@ -57,7 +57,7 @@ divider csi_ratio_re (
     .reset(reset),
 
     .dividend( prod_i),
-    .divisor( mag[31:8]),
+    .divisor(  {4'b0,mag[31:12]}),
     .input_strobe(temp_strobe),
 
     .quotient(p_i),
@@ -69,8 +69,8 @@ divider csi_ratio_im (
     .enable(enable), 
     .reset(reset),
 
-    .dividend( prod_i ),
-    .divisor(  mag[31:8] ),
+    .dividend( prod_q ),
+    .divisor(  {4'b0,mag[31:12]} ),
     .input_strobe(temp_strobe),
 
     .quotient(p_q)

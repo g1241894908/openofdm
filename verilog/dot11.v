@@ -332,7 +332,7 @@ wire [31:0]  csi_ratio_im_out;
 always @(posedge clock) begin
      if (csi_ratio_stb == 1) begin
          `ifdef DEBUG_PRINT
-             $display("[CSI] RX_I = %0d,RX_Q = %0d, ", $signed(csi_ratio_re_out),$signed(csi_ratio_im_out );
+             $display("[CSI] RX_I = %0d,RX_Q = %0d, ", $signed(csi_ratio_re_out),$signed(csi_ratio_im_out));
          `endif
     end
 end
@@ -346,7 +346,7 @@ complex_div csi_ratio_inst (
     .a_q(rx1_csi_out[15:0]),
     .b_i(rx2_csi_out[31:16]),
     .b_q(rx2_csi_out[15:0]),
-    .input_strobe(valid_in),
+    .input_strobe(csi_out_stb),
 
     .p_i(csi_ratio_re_out),
     .p_q(csi_ratio_im_out),

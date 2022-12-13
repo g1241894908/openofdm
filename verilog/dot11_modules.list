@@ -19,6 +19,7 @@ phase.v
 rotate.v
 equalizer.v
 complex_mult.v
+complex_div.v
 calc_mean.v
 deinterleave.v
 demodulate.v
